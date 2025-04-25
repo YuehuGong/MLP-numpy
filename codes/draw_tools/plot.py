@@ -11,7 +11,7 @@ def plot(runner, axes, set=colors_set['Kraftime']):
     # 绘制训练损失变化曲线
     axes[0].plot(epochs, runner.train_loss, color=train_color, label="Train loss")
     # 绘制评价损失变化曲线
-    axes[0].plot(epochs, runner.dev_loss, color=dev_color, linestyle="--", label="Dev loss")
+    # axes[0].plot(epochs, runner.dev_loss, color=dev_color, linestyle="--", label="Dev loss")
     # 绘制坐标轴和图例
     axes[0].set_ylabel("loss")
     axes[0].set_xlabel("iteration")
@@ -20,7 +20,7 @@ def plot(runner, axes, set=colors_set['Kraftime']):
     # 绘制训练准确率变化曲线
     axes[1].plot(epochs, runner.train_scores, color=train_color, label="Train accuracy")
     # 绘制评价准确率变化曲线
-    axes[1].plot(epochs, runner.dev_scores, color=dev_color, linestyle="--", label="Dev accuracy")
+    # axes[1].plot(epochs, runner.dev_scores, color=dev_color, linestyle="--", label="Dev accuracy")
     # 绘制坐标轴和图例
     axes[1].set_ylabel("score")
     axes[1].set_xlabel("iteration")

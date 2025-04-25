@@ -40,14 +40,24 @@ train_imgs = train_imgs / train_imgs.max()
 valid_imgs = valid_imgs / valid_imgs.max()
 
 linear_model = nn.models.Model_MLP([train_imgs.shape[-1], 400, 400 ,10], 'ReLU', [1e-4, 1e-4, 1e-4], dropout_p = 0.1)
+# linear_model = nn.models.MLP_ODE(
+#     size_list=[784, 256, 128, 10],
+#     act_func='ReLU',
+#     lambda_list=[1e-4, 1e-4, 1e-4],
+#     ode_hidden_dim=128,
+#     ode_method='rk4'
+# )
 # linear_model = nn.models.Model_CNN()
 optimizer = nn.optimizer.SGD(init_lr=0.06, model=linear_model)
+# optimizer = nn.optimizer.MomentGD(init_lr=0.06, model=linear_model, mu=0.95)
+# scheduler = nn.lr_scheduler.ExponentialLR(optimizer=optimizer)
 scheduler = nn.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[800, 2400, 4000], gamma=0.5)
+# scheduler = nn.lr_scheduler.StepLR(optimizer=optimizer, step_size = 200, gamma=0.8)
 loss_fn = nn.op.MultiCrossEntropyLoss(model=linear_model, max_classes=train_labs.max()+1)
 
 runner = nn.runner.RunnerM(linear_model, optimizer, nn.metric.accuracy, loss_fn, scheduler=scheduler)
 
-runner.train([train_imgs, train_labs], [valid_imgs, valid_labs], num_epochs=5, log_iters=100, save_dir=r'./best_models')
+runner.train([train_imgs, train_labs], [valid_imgs, valid_labs], num_epochs=3, log_iters=10, save_dir=r'./best_models')
 
 _, axes = plt.subplots(1, 2)
 axes.reshape(-1)

@@ -254,3 +254,156 @@ class Model_CNN(Layer):
         for layer in self.layers:
             if hasattr(layer, 'clear_grad'):
                 layer.clear_grad()
+
+class MLP_ODE(Layer):
+    def __init__(self, size_list=None, act_func=None, lambda_list=None, 
+                 ode_hidden_dim=64, ode_method='euler', ode_t_span=(0,1)):
+        """
+        Args:
+            size_list: MLP各层尺寸，如[input_dim, h1_dim, h2_dim,..., output_dim]
+            act_func: 激活函数类型 ('ReLU'/'Tanh')
+            lambda_list: 各层权重衰减系数
+            ode_hidden_dim: ODE层的隐藏维度
+            ode_method: ODE求解方法 ('euler'/'rk4')
+            ode_t_span: ODE求解时间区间
+        """
+        self.size_list = size_list
+        self.act_func = act_func
+        self.lambda_list = lambda_list
+        self.ode_hidden_dim = ode_hidden_dim
+        self.ode_method = ode_method
+        self.ode_t_span = ode_t_span
+        self.training = True  # 训练/测试模式标志
+
+        if size_list is not None and act_func is not None:
+            # 初始化MLP部分
+            self.layers = []
+            self.linear_layers = []  # 单独记录线性层用于参数访问
+            for i in range(len(size_list) - 1):
+                # 添加线性层
+                linear_layer = Linear(in_dim=size_list[i], out_dim=size_list[i+1])
+                if lambda_list is not None:
+                    linear_layer.weight_decay = True
+                    linear_layer.weight_decay_lambda = lambda_list[i]
+                self.layers.append(linear_layer)
+                self.linear_layers.append(linear_layer)
+                
+                # 添加激活层(最后一层不加)
+                if i < len(size_list) - 2:
+                    if act_func == 'ReLU':
+                        self.layers.append(ReLU())
+                    elif act_func == 'Tanh':
+                        self.layers.append(Tanh())
+            
+            # 初始化ODE部分 (插入在最后一个隐藏层和输出层之间)
+            self.ode_func_layers = [
+                Linear(ode_hidden_dim, ode_hidden_dim),
+                Tanh(),
+                Linear(ode_hidden_dim, ode_hidden_dim)
+            ]
+            self.ode_solver = ODESolver(self._ode_func, method=ode_method)
+            
+    def _ode_func(self, t, x):
+        """ODE的微分方程定义"""
+        for layer in self.ode_func_layers:
+            x = layer(x)
+        return x
+
+    def __call__(self, X, training=False):
+        self.training = training
+        return self.forward(X)
+
+    def forward(self, X):
+        # MLP前向传播 (到最后一个隐藏层)
+        x = X
+        for layer in self.layers[:-1]:  # 跳过最后的输出层
+            x = layer(x)
+        
+        # ODE求解
+        x = self.ode_solver.forward(x, t_span=self.ode_t_span)
+        
+        # 最后的输出层
+        output = self.layers[-1](x)
+        return output
+
+    def backward(self, loss_grad):
+        # 输出层梯度
+        grads = self.layers[-1].backward(loss_grad)
+        
+        # ODE部分反向传播 (简化版)
+        grads = self.ode_solver.backward(grads)
+        
+        # MLP部分反向传播
+        for layer in reversed(self.layers[:-1]):
+            grads = layer.backward(grads)
+            
+        return grads
+    def save_model(self, save_path):
+        """保存模型参数到文件"""
+        params = {
+            # 保存MLP部分参数
+            'mlp_params': [],
+            # 保存ODE部分参数
+            'ode_linear1_W': self.ode_func_layers[0].params['W'],
+            'ode_linear1_b': self.ode_func_layers[0].params['b'],
+            'ode_linear2_W': self.ode_func_layers[2].params['W'],
+            'ode_linear2_b': self.ode_func_layers[2].params['b'],
+            # 保存模型配置
+            'config': {
+                'size_list': self.size_list,
+                'act_func': self.act_func,
+                'lambda_list': self.lambda_list,
+                'ode_hidden_dim': self.ode_hidden_dim,
+                'ode_method': self.ode_method,
+                'ode_t_span': self.ode_t_span
+            }
+        }
+        
+        # 保存MLP各层参数
+        for i, layer in enumerate(self.linear_layers):
+            params['mlp_params'].append({
+                'W': layer.params['W'],
+                'b': layer.params['b'],
+                'weight_decay': layer.weight_decay,
+                'weight_decay_lambda': layer.weight_decay_lambda
+            })
+        
+        with open(save_path, 'wb') as f:
+            pickle.dump(params, f)
+
+    def load_model(self, param_list):
+        """从文件加载模型参数"""
+        with open(param_list, 'rb') as f:
+            params = pickle.load(f)
+        
+        # 加载模型配置
+        config = params['config']
+        self.size_list = config['size_list']
+        self.act_func = config['act_func']
+        self.lambda_list = config['lambda_list']
+        self.ode_hidden_dim = config['ode_hidden_dim']
+        self.ode_method = config['ode_method']
+        self.ode_t_span = config['ode_t_span']
+        
+        # 初始化模型结构
+        self.__init__(
+            size_list=config['size_list'],
+            act_func=config['act_func'],
+            lambda_list=config['lambda_list'],
+            ode_hidden_dim=config['ode_hidden_dim'],
+            ode_method=config['ode_method'],
+            ode_t_span=config['ode_t_span']
+        )
+        
+        # 加载MLP部分参数
+        for i, layer in enumerate(self.linear_layers):
+            layer.params['W'] = params['mlp_params'][i]['W']
+            layer.params['b'] = params['mlp_params'][i]['b']
+            layer.weight_decay = params['mlp_params'][i]['weight_decay']
+            layer.weight_decay_lambda = params['mlp_params'][i]['weight_decay_lambda']
+        
+        # 加载ODE部分参数
+        self.ode_func_layers[0].params['W'] = params['ode_linear1_W']
+        self.ode_func_layers[0].params['b'] = params['ode_linear1_b']
+        self.ode_func_layers[2].params['W'] = params['ode_linear2_W']
+        self.ode_func_layers[2].params['b'] = params['ode_linear2_b']

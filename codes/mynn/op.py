@@ -452,3 +452,108 @@ class Dropout(Layer):
     def backward(self, grad_output):
         return grad_output * self.mask  
 
+class ODEFunction(Layer):
+    """定义ODE的微分方程f(t,x)"""
+    def __init__(self, hidden_dim):
+        super().__init__()
+        self.net = Sequential(
+            Linear(hidden_dim, hidden_dim),
+            Tanh(),  # 推荐使用Tanh保证稳定性
+            Linear(hidden_dim, hidden_dim)
+        )
+        
+    def forward(self, t, x):
+        return self.net(x)
+
+class Tanh(Layer):
+    """Hyperbolic Tangent激活函数层"""
+    def __init__(self):
+        super().__init__()
+        self.optimizable = False  # 无参数
+        self.input = None  # 缓存输入用于反向传播
+
+    def __call__(self, X):
+        return self.forward(X)
+
+    def forward(self, X):
+        """
+        input: 任意形状的数组
+        output: 相同形状的tanh激活结果
+        """
+        self.input = X  # 缓存输入用于反向传播
+        return np.tanh(X)
+
+    def backward(self, grad_output):
+        """
+        input: 上游传来的梯度，形状与forward输出相同
+        output: 传递给前层的梯度
+        """
+        # tanh的导数是 1 - tanh^2(x)
+        tanh_x = np.tanh(self.input)
+        grad_input = grad_output * (1 - tanh_x ** 2)
+        return grad_input
+
+    def clear_grad(self):
+        pass  # 无参数需清空梯度
+
+class ODESolver(Layer):
+    """通用ODE求解器基类"""
+    def __init__(self, ode_func, method='euler', dt=0.1):
+        super().__init__()
+        self.ode_func = ode_func  # 微分方程函数 f(t, x)
+        self.method = method      # 求解方法：'euler'/'rk4'
+        self.dt = dt              # 步长
+        self.optimizable = False
+
+    def forward(self, x, t_span=(0, 1)):
+        if self.method == 'euler':
+            return self._euler_solve(x, t_span)
+        elif self.method == 'rk4':
+            return self._rk4_solve(x, t_span)
+        else:
+            raise ValueError("Unsupported method")
+
+    def _euler_solve(self, x, t_span):
+        t_start, t_end = t_span
+        num_steps = int((t_end - t_start) / self.dt)
+        for _ in range(num_steps):
+            dx = self.ode_func(None, x)  # 不依赖时间t
+            x = x + self.dt * dx
+        return x
+
+    def _rk4_solve(self, x, t_span):
+        t_start, t_end = t_span
+        num_steps = int((t_end - t_start) / self.dt)
+        for _ in range(num_steps):
+            k1 = self.ode_func(None, x)
+            k2 = self.ode_func(None, x + 0.5*self.dt*k1)
+            k3 = self.ode_func(None, x + 0.5*self.dt*k2)
+            k4 = self.ode_func(None, x + self.dt*k3)
+            x = x + (self.dt/6) * (k1 + 2*k2 + 2*k3 + k4)
+        return x
+
+    def backward(self, grad_output):
+        # 使用伴随方法(adjoint method)计算梯度
+        return grad_output  # 简化实现，实际需要更复杂的处理
+
+class NeuralODE(Layer):
+    """可学习的ODE层"""
+    def __init__(self, hidden_dim, method='euler', dt=0.1):
+        super().__init__()
+        # 定义微分方程对应的神经网络
+        self.net = Sequential(
+            Linear(hidden_dim, hidden_dim),
+            ReLU(),
+            Linear(hidden_dim, hidden_dim)
+        )
+        self.solver = ODESolver(self.ode_func, method, dt)
+        
+    def ode_func(self, t, x):
+        return self.net(x)
+
+    def forward(self, x, t_span=(0, 1)):
+        return self.solver.forward(x, t_span)
+
+    def backward(self, grad_output):
+        # 这里需要实现伴随方法的反向传播
+        return self.solver.backward(grad_output)

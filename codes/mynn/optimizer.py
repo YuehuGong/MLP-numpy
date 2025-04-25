@@ -34,12 +34,12 @@ class MomentGD(Optimizer):
         self.mu = mu
         self.velocity = {}
 
-        # 初始化每个参数的 velocity
+        # Initialize velocity for each parameter
         for layer in self.model.layers:
             if layer.optimizable:
                 self.velocity[layer] = {}
                 for key in layer.params:
-                    self.velocity[layer][key] = 0 
+                    self.velocity[layer][key] = np.zeros_like(layer.params[key])  # Match parameter shape
 
     def step(self):
         for layer in self.model.layers:
@@ -47,8 +47,12 @@ class MomentGD(Optimizer):
                 for key in layer.params:
                     v_prev = self.velocity[layer][key]
                     grad = layer.grads[key]
+                    
+                    # Fix: Ensure shapes match for weight decay
                     if layer.weight_decay:
-                        grad += layer.weight_decay_lambda * layer.params[key]
+                        grad = grad + layer.weight_decay_lambda * layer.params[key].reshape(grad.shape)
+                    
+                    # Momentum update
                     v_new = self.mu * v_prev - self.init_lr * grad
                     self.velocity[layer][key] = v_new
                     layer.params[key] += v_new

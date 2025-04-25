@@ -37,9 +37,8 @@ class MultiStepLR(scheduler):
 
 
 class ExponentialLR(scheduler):
-    def __init__(self, optimizer, gamma=0.99) -> None:
+    def __init__(self, optimizer, gamma=0.995) -> None:
         super().__init__(optimizer)
-        self.step_size = step_size
         self.gamma = gamma
 
     def step(self) -> None:
